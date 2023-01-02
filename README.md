@@ -48,18 +48,18 @@ Objects are also worthy of recording and sharing.
 I have a background in professional photography and also computer science. I have a wide array of devices that help me go from source materials, as listed above, to digital files to be processed for viewing. That includes:
 
 - Mirrorless and DSLR digital cameras
- -- Macro lenses for the above
- -- Slide duplicator
- -- Copy stand
- -- Tripod
- -- Light box
- -- Electronic flash
- -- Sheet of black paper
+  - Macro lenses for the above
+  - Slide duplicator
+  - Copy stand
+  - Tripod
+  - Light box
+  - Electronic flash
+  - Sheet of black paper
 - Scanners
- -- Flatbed
- -- Flatbed with transparency scanning
- -- Fujitsu Scansnap document scanners
- -- Film scanners
+  - Flatbed
+  - Flatbed with transparency scanning
+  - Fujitsu Scansnap document scanners
+  - Film scanners
 - Composite video digitizer
 
 Briefly, these are my current processes for image acquisition based on type of image.
@@ -91,8 +91,8 @@ The essential operations I've identified and included in WImageEdit.py are:
 - Flip/Flop (mirroring)
 - Inversion/Negation
 - Brightness/Contrast adjustment
- -- Linear
- -- Sigmoidal
+  - Linear
+  - Sigmoidal
 - Color correction
 - Contrast stretch
 - Resize
@@ -119,10 +119,10 @@ Photo frames are relatively expensive. It is impractical for most of us to buy a
 This set of tools was only possible because of the free open-source software projects it was built from.
 
 - Python
- -- PySimpleGUI
- -- docopt
- -- pillow (PIL)
- -- Wand
+  - PySimpleGUI
+  - docopt
+  - pillow (PIL)
+  - Wand
 - ImageMagick
 - JPEGOptim
 
