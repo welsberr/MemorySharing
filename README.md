@@ -48,18 +48,18 @@ Objects are also worthy of recording and sharing.
 I have a background in professional photography and also computer science. I have a wide array of devices that help me go from source materials, as listed above, to digital files to be processed for viewing. That includes:
 
 - Mirrorless and DSLR digital cameras
--- Macro lenses for the above
--- Slide duplicator
--- Copy stand
--- Tripod
--- Light box
--- Electronic flash
--- Sheet of black paper
+ - Macro lenses for the above
+ - Slide duplicator
+ - Copy stand
+ - Tripod
+ - Light box
+ - Electronic flash
+ - Sheet of black paper
 - Scanners
--- Flatbed
--- Flatbed with transparency scanning
--- Fujitsu Scansnap document scanners
--- Film scanners
+ - Flatbed
+ - Flatbed with transparency scanning
+ - Fujitsu Scansnap document scanners
+ - Film scanners
 - Composite video digitizer
 
 Briefly, these are my current processes for image acquisition based on type of image.
@@ -82,7 +82,7 @@ As you begin doing this, you are going to start running into logistical issues. 
 
 ### Image editing
 
-Certain classes of images will need post-processing to make them ready for final steps in the journey to the photo frame. Negatives need to be turned into positive versions. Many older negatives or prints may need cropping to eitehr exclude damaged areas or highlight the subject. As mentioned earlier, there are a great many existing photo editors, so one may inquire why I would feel the need for making my own? The answer is, again, trying to make the best use of my time. There are a relatively limited number of adjustements I typically make to either a scanned print or a negative in order to prepare it for viewing. By making my own application, I can put all the most-used options onto a single page, select which ones to apply, and allow me to modify things as needed, while making it simple and reasonably quick to advance through a directory of images. The software tool I have for this I am calling WImageEdit.py. It uses the Python Imaging Library (PIL) for display of source and post-processed images, and calls an external ImageMagick excetuable to actually do the various indicated transformations.
+Certain classes of images will need post-processing to make them ready for final steps in the journey to the photo frame. Negatives need to be turned into positive versions. Many older negatives or prints may need cropping to eitehr exclude damaged areas or highlight the subject. As mentioned earlier, there are a great many existing photo editors, so one may inquire why I would feel the need for making my own? The answer is, again, trying to make the best use of my time. There are a relatively limited number of adjustments I typically make to either a scanned print or a negative in order to prepare it for viewing. By making my own application, I can put all the most-used options onto a single page, select which ones to apply, and allow me to modify things as needed, while making it simple and reasonably quick to advance through a directory of images. The software tool I have for this I am calling WImageEdit.py. It uses the Python Imaging Library (PIL) for display of source and post-processed images, and calls an external ImageMagick excetuable to actually do the various indicated transformations.
 
 The essential operations I've identified and included in WImageEdit.py are:
 
@@ -91,8 +91,8 @@ The essential operations I've identified and included in WImageEdit.py are:
 - Flip/Flop (mirroring)
 - Inversion/Negation
 - Brightness/Contrast adjustment
--- Linear
--- Sigmoidal
+ - Linear
+ - Sigmoidal
 - Color correction
 - Contrast stretch
 - Resize
@@ -119,10 +119,10 @@ Photo frames are relatively expensive. It is impractical for most of us to buy a
 This set of tools was only possible because of the free open-source software projects it was built from.
 
 - Python
--- PySimpleGUI
--- docopt
--- pillow (PIL)
--- Wand
+ - PySimpleGUI
+ - docopt
+ - pillow (PIL)
+ - Wand
 - ImageMagick
 - JPEGOptim
 
@@ -130,6 +130,6 @@ This set of tools was only possible because of the free open-source software pro
 
 As of 2023-01-01, this is all essentially pre-alpha class code. There is very little in the way of testing in place. I've been pressed to be able to do anything in this regard, and this latest holiday break gave me enough time to make what I considered to be a reasonable start on the tooling I've long mused about having.
 
-As such, I'd urge you to only place copies of digital files where these tools are used, until you have satisfied yourself of the usefulness and reliability of this tools. While I am cognizant of the need to preserve original files where they are and not threaten them with changes, some tools do directly affect original files (PyMFR.py, by renaming files), and other tools could overwrite originals if a bug were present (esp. WImageEdit.py).
+As such, I'd urge you to only place copies of digital files where these tools are used, until you have satisfied yourself of the usefulness and reliability of these tools. While I am cognizant of the need to preserve original files where they are and not threaten them with changes, some tools do directly affect original files (PyMFR.py, by renaming files), and other tools could overwrite originals if a bug were present (esp. WImageEdit.py).
 
 
