@@ -20,6 +20,7 @@ The restricted capabilities in this editor include:
 - Color correction
 - Contrast stretch
 - Resize
+- Sharpen
 - Grayscale
 
 These are all whole-image or regional operations. Ther e are no individual pixel-level modifications included here. I don't expect to add pixel-level operations. Cloning or 'healing' operations would be the most useful such operations, but the implementation burden and the fact that those are time-consuming tasks argues for leaving those to full-featured image editors.
@@ -60,6 +61,12 @@ In the ImageEditing directory, launch as:
 The 'Browse' button launches the FileBrowser dialog. Navigate to the directory with copies of your digital files for processing, select an image (JPEG, PNG, or GIF images).
 
 Press the 'Load Image' button. Two views of the selected image should appear. These are resized to fit in a 400x400 pixel space. The one on the laft represents the source image, and the one on the right represents the image as it will appear given currently selected image processing operations.
+
+### Actions
+
+There are options for color positive materials, color negative materials, black-and-white positive materials,
+and black-and-white negative materials. When selected, the common set of controls for processing such
+materials will be set.
 
 ### Cropping
 
@@ -125,6 +132,10 @@ Press the 'Update Command' button. The ImageMagick command text ('Process:') wil
 
 Press the 'Process Image' button. It will remain highlighted while the ImageMagick command is applied to the source image to produce the processed image, which will update the image on the right.
 
+### Sharpen
+
+The 'Sharpen' operation applies a sharpening operation to the image. 
+
 ### Invert
 
 Select the 'Invert' checkbox if the source image is either a black-and-white or color negative.
@@ -189,9 +200,9 @@ Clicking the 'Process Image' button will apply the 'Process:' commmand text as a
 
 Clicking the 'Process to File' button will apply the 'Process:' command, but the destination file will have the name in 'New Name:' with the same extension as the source file. At present, there is no check to make sure the source file is not overwritten. It is strongly urged that you do not allow the 'New Name:' field to collide with the source file name.
 
-### Next Image
+### Previous Image and Next Image
 
-Clicking the 'Next Image' button is intended to select the next file in an alphabetically sorted list of files. (See Bugs below, but one currently has to press 'Next Image' twice to actually have the source file name change in the input.)
+Clicking the 'Previous Image' or 'Next Image' button is intended to select the previous or next file in an alphabetically sorted list of files.
 
 ### Load Image
 
@@ -201,17 +212,9 @@ If this file was processed to a different file before, the settings are read fro
 
 ## Bugs
 
-### Next image advance
+2023-01-04 Protecting source images
 
-2023-01-01
-
-The 'Next Image' button needs two presses to actually load the next image.
-
-### Window refresh location
-
-2023-01-01
-
-The UI gets swapped out with every base image load. The window shifts around on the screen some, and may not all be visible as placed.
+There needs to be a check so as not to overwrite the source image.
 
 ## Possible Future Features
 
