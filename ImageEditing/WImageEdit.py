@@ -24,6 +24,15 @@ Resize upward: Probably should detect upsizing and use the process from the Imag
   -define filter:filter=Sinc -define filter:window=Jinc -define filter:lobes=3 \
   -resize 400% -sigmoidal-contrast 11.6933 -colorspace sRGB output.png');
 
+2023-01-03
+ - Refactored event loop so that if there are more than 10 lines of code to handle an
+   event, that gets an event handler function and call.
+   - Except for the swapping of layouts; that apparently needs to actually happen in the event loop
+ - Added 'actions' to set common controls based on the type of image we are handling
+   - Color positive, color nagetive, B&W positive, B&W negative
+   - Crop always enabled
+ - Added 'Previous Image' button to allow backing up.
+
 """
 
 import io
@@ -134,26 +143,37 @@ def update_proc(values, filendx=0):
     values2 = values.copy()
     print([k for k in values.keys()])
     print([k for k in values2.keys()])
-    if '-IMAGE-' in values2:
-        values2.pop('-IMAGE-')
-    if '-IMAGE2-' in values2:
-        values2.pop("-IMAGE2-")
-    if '-GRAPH-' in values2:
-        values2.pop('-GRAPH-')
+    ignore = ['-IMAGE-', '-IMAGE2-', '-GRAPH-', '-NEWPREFIX-', '-NEWSUFFIX-']
+    for igi in ignore:
+        if igi in values2:
+            values2.pop(igi)
+
+    if (0):
+        if '-IMAGE-' in values2:
+            values2.pop('-IMAGE-')
+        if '-IMAGE2-' in values2:
+            values2.pop("-IMAGE2-")
+        if '-GRAPH-' in values2:
+            values2.pop('-GRAPH-')
     srcpath, srcfn = os.path.split(values2['-FILE-'])
     dproc[srcfn] = values2
     json.dump(dproc, open(PROCJSON,"w"))
 
-def restore_from_proc(srcfn, window):
+def restore_from_proc(srcfn, window, persist={}):
     """
     Transfers process metadata from known-good settings for 
     a file and sets UI elements accordingly.
     """
+    ignore = ['-IMAGE-', '-IMAGE2-', '-GRAPH-', '-NEWPREFIX-', '-NEWSUFFIX-']
     values = dproc.get(srcfn, None)
     if values in [None, {}]:
         return False
     for kk, vv in values.items():
-        print(f"restore {kk} as {vv}")
+        if not kk in ignore:
+            print(f"restore {kk} as {vv}")
+            window[kk].update(vv)
+    for kk, vv in persist.items():
+        print(f"persist {kk} as {vv}")
         window[kk].update(vv)
     filendx = dproc.get("filendx", 0)
     return filendx
@@ -224,6 +244,7 @@ def set_process_state(event, window, values):
     rotate = ""
     flip = ""
     flop = ""
+    sharpen = ""
 
     if not values["-CROP-"] in [None, '']:
         crop_part = values["-CROP-"]
@@ -266,6 +287,9 @@ def set_process_state(event, window, values):
     if values['-FLOP-'] in [True]:
         flop = '-flop'
 
+    if values['-SHARPEN-'] in [True]:
+        sharpen = '-sharpen %s' % values['-SHARPEN_GEO-']
+
     # Brightness-Contrast?
     if values['-BRIGHTNESS-CONTRAST-'] in [True]:
         brightcontrast = "-brightness-contrast %s" % values['-BRIGHTNESS-CONTRAST_GEO-']
@@ -302,6 +326,8 @@ def set_process_state(event, window, values):
                       sigmoidalcontrast,
                       grayscale,
                       negate,
+                      resize,
+                      sharpen,
                       destfn]
                      ]
                     if 0 < len(y) 
@@ -365,10 +391,21 @@ def make_layout(ctx, imgwidth=400, imgheight=400):
             sg.Text("Image File"),
             sg.Input(ctx.fields['-FILE-'], size=(64, 1), key="-FILE-", enable_events=True),
             sg.FileBrowse("Browse", file_types=file_types, key='-BROWSE-'),
-            sg.Button("Next Image", key="-NEXTIMAGE-"),
-            sg.Button("Load Image", key="-LOADIMAGE_B-"),
+            sg.Button("Previous Image", key="-PREVIOUSIMAGE-", enable_events=True,),
+            sg.Button("Next Image", key="-NEXTIMAGE-", enable_events=True,),
+            sg.Button("Load Image", key="-LOADIMAGE_B-", enable_events=True,),
+            sg.T("  Actions:"),
+            sg.R("None","-ACTIONS-", default=True, key="-ACTION_NONE-"),
+            sg.R("Color Pos","-ACTIONS-", default=False, key="-ACTION_COLORPOSITIVE-", enable_events=True,),
+            sg.R("Color Neg","-ACTIONS-", default=False, key="-ACTION_COLORNEGATIVE-", enable_events=True,),
+            sg.R("B&W Pos","-ACTIONS-", default=False, key="-ACTION_BWPOSITIVE-", enable_events=True,),
+            sg.R("B&W Neg","-ACTIONS-", default=False, key="-ACTION_BWNEGATIVE-", enable_events=True,),
         ],
-        [sg.Text(key='-INFO-', size=(60, 1))],
+        [
+            sg.T("New File Prefix, Suffix:"),
+            sg.Input(ctx.fields['-NEWPREFIX-'], size=(24,1), key="-NEWPREFIX-", enable_events=True),
+            sg.Input(ctx.fields['-NEWSUFFIX-'], size=(24,1), key="-NEWSUFFIX-", enable_events=True),
+            sg.Text(key='-INFO-', size=(60, 1))],
 
         [
             sg.Text("Process:"),
@@ -399,6 +436,9 @@ def make_layout(ctx, imgwidth=400, imgheight=400):
                 sg.R("Increase",'-SIGCON-R-',default=True, key="-SIGCON_UP-"),
                 sg.R("Decrease",'-SIGCON-R-',default=False, key="-SIGCON_DOWN-"),
                 sg.Input("1,50%", size=(16,1), key='-SIGMOIDAL-CONTRAST_GEO-'),
+                sg.T("    "),
+                sg.Checkbox('Sharpen', default=False, key='-SHARPEN-'),
+                sg.Input("0x1.0", size=(12,1), key='-SHARPEN_GEO-'),                
             ],
             [
                 sg.Checkbox('Invert', default=False, key='-INVERT_CB-'),
@@ -484,6 +524,328 @@ def make_crop(myrect, origwidth, origheight, cropwidth, cropheight):
         print(estr)
     return mycrop
 
+# ==== Event handlers ----------------------------------------
+
+def eh_refresh_newname(ctx, event, window, values, params={}):
+    """
+    Time to refresh the new file name.
+    """
+    try:
+        srcfn = values["-FILE-"]
+        srcpath, srcfile = os.path.split(os.path.abspath(srcfn))
+        srcbase, srcext = os.path.splitext(srcfile)
+        ctx.newprefix = values['-NEWPREFIX-']
+        ctx.newsuffix = values['-NEWSUFFIX-']
+        newbase = values['-NEWPREFIX-'] + srcbase + values['-NEWSUFFIX-']
+        ctx.fields['-FILE-'] = srcfn
+        ctx.fields['-NEWNAME-'] = newbase
+        window['-NEWNAME-'].update(newbase)
+        return srcfn, srcpath, srcfile, srcbase, srcext, newbase
+    except:
+        estr = f"Error: {traceback.format_exc()}"
+        print(estr)
+        return False
+
+#    ==== Actions -----------------------------------
+def eh_action_set(window, params):
+    for kk in params.keys():
+        try:
+            window[kk].update(params[kk])
+        except:
+            estr = f"Error: {traceback.format_exc()}"
+            print(estr)
+    
+    
+def eh_action_colorpos(ctx, event, window, values, params=
+                       {
+                           '-CROP_CB-':True,
+                           '-RECT-': True,
+                           '-INVERT_CB-': False,
+                           '-COLORCORRECTION_CB-': True,
+                           '-CONTRASTSTRETCH_CB-': True,
+                           '-SIGMOIDAL-CONTRAST-': True,
+                           '-GRAYSCALE_CB-': False,
+                       }
+                       ):
+    """
+    Set values for processing a color positive
+    """
+    eh_action_set(window, params)
+
+
+def eh_action_colorneg(ctx, event, window, values, params=
+                       {
+                           '-CROP_CB-':True,
+                           '-RECT-': True,
+                           '-INVERT_CB-': True,
+                           '-COLORCORRECTION_CB-': True,
+                           '-CONTRASTSTRETCH_CB-': True,
+                           '-SIGMOIDAL-CONTRAST-': True,
+                           '-GRAYSCALE_CB-': False,
+                       }
+                       ):
+    """
+    Set values for processing a color positive
+    """
+    eh_action_set(window, params)
+
+
+def eh_action_bwpos(ctx, event, window, values, params=
+                       {
+                           '-CROP_CB-':True,
+                           '-INVERT_CB-': False,
+                           '-RECT-': True,
+                           '-COLORCORRECTION_CB-': True,
+                           '-CONTRASTSTRETCH_CB-': True,
+                           '-SIGMOIDAL-CONTRAST-': True,
+                           '-GRAYSCALE_CB-': True,
+                       }
+                       ):
+    """
+    Set values for processing a color positive
+    """
+    eh_action_set(window, params)
+
+def eh_action_bwneg(ctx, event, window, values, params=
+                       {
+                           '-CROP_CB-':True,
+                           '-RECT-': True,
+                           '-INVERT_CB-': True,
+                           '-COLORCORRECTION_CB-': True,
+                           '-CONTRASTSTRETCH_CB-': True,
+                           '-SIGMOIDAL-CONTRAST-': True,
+                           '-GRAYSCALE_CB-': True,
+                       }
+                       ):
+    """
+    Set values for processing a color positive
+    """
+    eh_action_set(window, params)
+
+def eh_action_dispatch(ctx, event, window, values):
+    """
+    Call the appropriate action.
+    """
+    if event in ['-ACTION_COLORPOSITIVE-']:
+        eh_action_colorpos(ctx, event, window, values)
+    elif event in ['-ACTION_COLORNEGATIVE-']:
+        eh_action_colorneg(ctx, event, window, values)
+    elif event in ['-ACTION_BWPOSITIVE-']:
+        eh_action_bwpos(ctx, event, window, values)
+    elif event in ['-ACTION_BWNEGATIVE-']:
+        eh_action_bwneg(ctx, event, window, values)
+
+#    ==== Process to file --------------------------------
+def eh_process2file(ctx, event, window, values):
+    try:
+        update_proc(values)
+        print(values)
+        if (0):
+            srcfn = values["-FILE-"]
+            srcpath, srcfile = os.path.split(srcfn)
+            srcbase, srcext = os.path.splitext(srcfn)
+            ctx.lastfile = srcfile
+            destfn = values['-NEWNAME-'] + srcext
+        filevals = eh_refresh_newname(ctx, event, window, values)
+        destfn = "_ie_"
+        if filevals:
+            srcfn, filepath, filebase, fileleft, fileext, newbase = filevals
+            destfn = values['-NEWNAME-'] + fileext
+        else:
+            pass
+
+        if os.path.exists(srcfn):
+            # Make the cmd
+            cmd = values['-PROCESS-']
+            cmd = cmd.replace('{srcfn}', srcfn)
+            cmd = cmd.replace(values["-FILE-"], srcfn)
+            cmd = cmd.replace('{destfn}', destfn)
+            cmd = cmd.replace('tempimg.jpg', destfn)
+            print(cmd)
+            os.system(cmd)
+    except:
+        estr = f"Error: {traceback.format_exc()}"
+        print(estr)
+        return False
+
+#    ==== Graph ---------------------------------------------
+def eh_graph(ctx, event, window, values):
+    """
+    """
+    try:
+        #ctx.graph = Holder()
+        
+        ctx.graph.x, ctx.graph.y = values["-GRAPH-"]
+        if not ctx.graph.dragging:
+            ctx.graph.start_point = (ctx.graph.x, ctx.graph.y)
+            ctx.graph.dragging = True
+            ctx.graph.drag_figures = graph.get_figures_at_location((ctx.graph.x,ctx.graph.y))
+            ctx.graph.lastxy = ctx.graph.x, ctx.graph.y
+        else:
+            ctx.graph.end_point = (ctx.graph.x, ctx.graph.y)
+        if ctx.graph.prior_rect:
+            ctx.graph.graph.delete_figure(ctx.graph.prior_rect)
+        ctx.graph.delta_x, ctx.graph.delta_y = ctx.graph.x - ctx.graph.lastxy[0], ctx.graph.y - ctx.graph.lastxy[1]
+        ctx.graph.lastxy = ctx.graph.x,ctx.graph.y
+        if None not in (ctx.graph.start_point, ctx.graph.end_point):
+            if values['-RECT-']:
+                ctx.graph.prior_rect = ctx.graph.graph.draw_rectangle(ctx.graph.start_point,
+                                                                      ctx.graph.end_point,
+                                                                      fill_color=None,
+                                                                      line_color='red')
+            elif values['-ERASE-']:
+                for figure in ctx.graph.drag_figures:
+                    ctx.graph.graph.delete_figure(figure)
+                if not ctx.imgdata in [None, {}]:
+                    ctx.graph.graph = window["-GRAPH-"]  # type: sg.Graph
+                    ctx.graph.graph.draw_image(data=ctx.imgdata['data'], location=(0,ctx.imgdata['height']))
+            elif values['-CLEAR-']:
+                ctx.graph.graph.erase()
+                if not ctx.imgdata in [None, {}]:
+                    ctx.graph.graph = window["-GRAPH-"]  # type: sg.Graph
+                    ctx.graph.graph.draw_image(data=ctx.imgdata['data'], location=(0,ctx.imgdata['height']))
+
+        window["-INFO-"].update(value=f"mouse {values['-GRAPH-']}")
+
+    except:
+        estr = f"Error: {traceback.format_exc()}"
+        print(estr)
+        return False
+
+#    ==== Load Image ---------------------------------------------
+def eh_load_image(ctx, event, window, values):
+    """
+    Loads the selected image in both source and dest views.
+    """
+    try:
+        print(event)
+        
+        if event in ('-FILE-'):
+            print('-FILE- event', ctx.fileselected, values['-FILE-'])
+            if os.path.abspath(ctx.fileselected) != os.path.abspath(values['-FILE-']):
+                print('Selected file change detected.')
+                # Something changed, follow through
+                foldername = values['-BROWSE-'] or '.'
+
+                ctx.fileselected = os.path.abspath(values['-FILE-'])
+                ctx.files = [os.path.abspath(x) for x in sorted(get_files_of_types(foldername))]
+                print("different file", foldername, ctx.files, ctx.fileselected)
+                ctx.filendx = 0
+                try:
+                    ctx.filendx = ctx.files.index(ctx.fileselected)
+                    print("New file index", ctx.filendx)
+                except:
+                    estr = f"Error: {traceback.format_exc()}"
+                    print(estr)
+            else:
+                # Already processed
+                return False
+
+        # set_process_state(event, window, values)
+
+        if (0):
+            filename = values["-FILE-"]
+            ctx.fields['-FILE-'] = filename
+            filepath, filebase = os.path.split(filename)
+            print("calling restore_from_proc", filebase)
+            fileleft, fileext = os.path.splitext(filebase)
+            newname = fileleft + "_ie_"
+            ctx.fields['-NEWNAME-'] = newname
+            window['-NEWNAME-'].update(newname)
+        else:
+            ctx.filevals = eh_refresh_newname(ctx, event, window, values)
+            if ctx.filevals:
+                filename, filepath, filebase, fileleft, fileext, newbase = ctx.filevals
+            else:
+                pass
+        persist = {'-NEWPREFIX-': values['-NEWPREFIX-'], '-NEWSUFFIX-': values['-NEWSUFFIX-']}
+
+        # Use last good settings as basis, if available
+        if not ctx.lastfile in [None, '']:
+            restore_from_proc(ctx.lastfile, window, persist=persist)
+        # If this file has its own settings, set those
+        restore_from_proc(filebase, window, persist=persist)
+
+        if os.path.exists(filename):
+            print("resizing for image canvas, both images")
+            imgdata, imgwidth, imgheight, origwidth, origheight = resize_image(values["-FILE-"],resize=(DISPW,DISPH))
+            ctx.imgdata = {'data': imgdata, 'width': imgwidth, 'height': imgheight, 'origwidth': origwidth, 'origheight': origheight}
+
+        # Need to replace the window layout, restore again
+        layout = None
+        newlayout = make_layout(ctx, imgwidth=ctx.imgdata['width'], imgheight=ctx.imgdata['height'])
+        ctx.window1 = sg.Window(PROGNAME, newlayout, return_keyboard_events=True, finalize=True, location=WINDOWLOCATION)
+
+        return True
+    except:
+        estr = f"Error: {traceback.format_exc()}"
+        print(estr)
+        return False
+
+#    ==== process_image ---------------------------------------------
+def eh_process_image(ctx, event, window, values):
+    """
+    """
+    try:
+        print(event)
+        # set_process_state(event, window, values)
+        srcfn = values["-FILE-"]
+        srcbase, srcext = os.path.splitext(srcfn)
+        destfn = 'tempimg' + srcext
+        if os.path.exists(srcfn):
+            # Make the cmd
+            cmd = values['-PROCESS-']
+            cmd = cmd.replace('{srcfn}', srcfn)
+            cmd = cmd.replace(values["-FILE-"], srcfn)
+            cmd = cmd.replace('{destfn}', destfn)
+            cmd = cmd.replace('tempimg.jpg', destfn)
+            print(cmd)
+            os.system(cmd)
+            if os.path.exists(destfn):
+                imgdata, imgwidth, imgheight, origwidth, origheight = resize_image(destfn,resize=(DISPW,DISPH))
+                ctx.imgdata2 = {'data': imgdata, 'width': imgwidth, 'height': imgheight, 'origwidth': origwidth, 'origheight': origheight}
+
+                window["-IMAGE2-"].update(data=imgdata)
+                if (0):
+                    image = Image.open(destfn)
+                    image.thumbnail((DISPW, DISPH))
+
+                    bio = io.BytesIO()
+                    image.save(bio, format="PNG")
+                    window["-IMAGE2-"].update(data=bio.getvalue())
+
+    except:
+        estr = f"Error: {traceback.format_exc()}"
+        print(estr)
+        return False
+
+#    ==== Prefix Suffix ---------------------------------------------
+def eh_prefix_suffix(ctx, event, window, values):
+    """
+    """
+    try:
+        ctx.fields['-NEWPREFIX-'] = values['-NEWPREFIX-']
+        ctx.fields['-NEWSUFFIX-'] = values['-NEWSUFFIX-']
+        pass
+    except:
+        estr = f"Error: {traceback.format_exc()}"
+        print(estr)
+        return False
+    
+
+#    ==== Template ---------------------------------------------
+def eh_template(ctx, event, window, values):
+    """
+    """
+    try:
+        pass
+    except:
+        estr = f"Error: {traceback.format_exc()}"
+        print(estr)
+        return False
+    
+
+    
 # ==== Event Loop -------------------------------------------------------
 def sg_event_loop_window_1():
     """
@@ -501,14 +863,17 @@ def sg_event_loop_window_1():
         ctx.fields = {
             '-FILE-': "",
             '-NEWNAME-': "new_name",
+            '-NEWPREFIX-': "proc_",
+            '-NEWSUFFIX-': "_ie_",
             }
         ctx.filendx = 0
         ctx.files = sorted(get_files_of_types("."))
         ctx.fileselected = ""
         ctx.lastfile = None
-        
-        ctx.imgdata = {}
-        ctx.imgdata2 = {}
+
+        # Default image width and height needs to be in
+        ctx.imgdata = {'width':400, 'height': 400}
+        ctx.imgdata2 = {'width':400, 'height': 400}
         
         layout = make_layout(ctx)
 
@@ -538,89 +903,52 @@ def sg_event_loop_window_1():
         
     # Pre-loop setup
     # get the graph element for ease of use later
-    graph = window["-GRAPH-"]  # type: sg.Graph
+    ctx.graph = Holder()
+    ctx.graph.dragging = False
+    ctx.graph.lastxy = 0, 0
+    ctx.graph.graph = window["-GRAPH-"]  # type: sg.Graph
     # graph.draw_image(data=logo200, location=(0,400))
 
-    dragging = False
-    start_point = end_point = prior_rect = None
+    ctx.graph.dragging = False
+    ctx.graph.start_point = ctx.graph.end_point = ctx.graph.prior_rect = None
     # graph.bind('<Button-3>', '+RIGHT+')
 
     print("entering event loop")
-    while True:
+    running = True
+    while running:
         event, values = window.read()
         # print(event)
         if event == "Exit" or event == sg.WIN_CLOSED:
             break
+        # ==== Actions ----------------
+        if event in ["-ACTION-", "-ACTION_COLORPOSITIVE-","-ACTION_COLORNEGATIVE-","-ACTION_BWPOSITIVE-","-ACTION_BWNEGATIVE-"]:
+            eh_action_dispatch(ctx, event, window, values)
         # ---- Graph element -----------------------
         if event in ('-MOVE-', '-MOVEALL-'):
-            graph.set_cursor(cursor='fleur')          # not yet released method... coming soon!
+            ctx.graph.graph.set_cursor(cursor='fleur')          # not yet released method... coming soon!
         elif not event.startswith('-GRAPH-'):
-            graph.set_cursor(cursor='left_ptr')       # not yet released method... coming soon!
+            ctx.graph.graph.set_cursor(cursor='left_ptr')       # not yet released method... coming soon!
 
         if event in ["-GRAPH-"]:  # if there's a "Graph" event, then it's a mouse
-            x, y = values["-GRAPH-"]
-            if not dragging:
-                start_point = (x, y)
-                dragging = True
-                drag_figures = graph.get_figures_at_location((x,y))
-                lastxy = x, y
-            else:
-                end_point = (x, y)
-            if prior_rect:
-                graph.delete_figure(prior_rect)
-            delta_x, delta_y = x - lastxy[0], y - lastxy[1]
-            lastxy = x,y
-            if None not in (start_point, end_point):
-                #if values['-MOVE-']:
-                #    for fig in drag_figures:
-                #        graph.move_figure(fig, delta_x, delta_y)
-                #        graph.update()
-                #elif values['-RECT-']:
-                if values['-RECT-']:
-                    prior_rect = graph.draw_rectangle(start_point, end_point,fill_color=None, line_color='red')
-                #elif values['-CIRCLE-']:
-                #    prior_rect = graph.draw_circle(start_point, end_point[0]-start_point[0], fill_color=None, line_color='green')
-                #elif values['-LINE-']:
-                #    prior_rect = graph.draw_line(start_point, end_point, width=4)
-                #elif values['-POINT-']:
-                #    graph.draw_point((x,y), size=8)
-                elif values['-ERASE-']:
-                    for figure in drag_figures:
-                        graph.delete_figure(figure)
-                    if not ctx.imgdata in [None, {}]:
-                        graph = window["-GRAPH-"]  # type: sg.Graph
-                        graph.draw_image(data=ctx.imgdata['data'], location=(0,ctx.imgdata['height']))
-                        
-                elif values['-CLEAR-']:
-                    graph.erase()
-                    if not ctx.imgdata in [None, {}]:
-                        graph = window["-GRAPH-"]  # type: sg.Graph
-                        graph.draw_image(data=ctx.imgdata['data'], location=(0,ctx.imgdata['height']))
-                #elif values['-MOVEALL-']:
-                #    graph.move(delta_x, delta_y)
-                #elif values['-FRONT-']:
-                #    for fig in drag_figures:
-                #        graph.bring_figure_to_front(fig)
-                #elif values['-BACK-']:
-                #    for fig in drag_figures:
-                #        graph.send_figure_to_back(fig)
-            window["-INFO-"].update(value=f"mouse {values['-GRAPH-']}")
+            eh_graph(ctx, event, window, values)
+            
         elif event.endswith('+UP'):  # The drawing has ended because mouse up
-            window["-INFO-"].update(value=f"grabbed rectangle from {start_point} to {end_point}")
-            ctx.rect = (start_point, end_point)
+            window["-INFO-"].update(value=f"grabbed rectangle from {ctx.graph.start_point} to {ctx.graph.end_point}")
+            ctx.rect = (ctx.graph.start_point, ctx.graph.end_point)
+            ctx.graph.rect = (ctx.graph.start_point, ctx.graph.end_point)
             # Set chop points
             mycrop = make_crop(ctx.rect,
                                ctx.imgdata['origwidth'],
                                ctx.imgdata['origheight'],
                                ctx.imgdata['width'],
                                ctx.imgdata['height'])
-            start_point, end_point = None, None  # enable grabbing a new rect
-            dragging = False
-            prior_rect = None
+            ctx.graph.start_point, ctx.graph.end_point = None, None  # enable grabbing a new rect
+            ctx.graph.dragging = False
+            ctx.graph.prior_rect = None
             window["-CROP-"].update(value=mycrop)
-        elif event.endswith('+RIGHT+'):  # Righ click
+        elif event.endswith('+RIGHT+'):  # Right click
             window["-INFO-"].update(value=f"Right clicked location {values['-GRAPH-']}")
-        elif event.endswith('+MOTION+'):  # Righ click
+        elif event.endswith('+MOTION+'):  # 
             window["-INFO-"].update(value=f"mouse freely moving {values['-GRAPH-']}")
         elif event == '-SAVE-':
             # filename = sg.popup_get_file('Choose file (PNG, JPG, GIF) to save to', save_as=True)
@@ -629,14 +957,25 @@ def sg_event_loop_window_1():
         elif event == 'Erase item':
             window["-INFO-"].update(value=f"Right click erase at {values['-GRAPH-']}")
             if values['-GRAPH-'] != (None, None):
-                drag_figures = graph.get_figures_at_location(values['-GRAPH-'])
-                for figure in drag_figures:
-                    graph.delete_figure(figure)
+                ctx.graph.drag_figures = ctx.graph.graph.get_figures_at_location(values['-GRAPH-'])
+                for figure in ctx.graph.drag_figures:
+                    ctx.graph.graph.delete_figure(figure)
 
         if window.find_element_with_focus().Key == '-IMAGE-':
             print('IMAGE event ', event, values)
         if event in ["-IMAGE-+UP", "-IMAGE-+DOWN"]:
             print('IMAGE mouse event ', event, values)
+        if event in ["-PREVIOUSIMAGE-"]:
+            print('-PREVIOUSIMAGE- event')
+            nextindex = (ctx.filendx - 1) % len(ctx.files) # Wrap via modulo
+            nextfile = ctx.files[nextindex]
+            if nextfile == values['-FILE-']:
+                nextindex = (ctx.filendx + 1) % len(ctx.files) # Wrap via modulo
+            print(f"Current index {ctx.filendx}, next index {nextindex}")
+            ctx.filendx = nextindex
+            window["-FILE-"].update(ctx.files[nextindex])
+            window.write_event_value('-LOADIMAGE_B-', True)
+            
         if event in ["-NEXTIMAGE-"]:
             print('-NEXTIMAGE- event')
             nextindex = (ctx.filendx + 1) % len(ctx.files) # Wrap via modulo
@@ -646,140 +985,47 @@ def sg_event_loop_window_1():
             print(f"Current index {ctx.filendx}, next index {nextindex}")
             ctx.filendx = nextindex
             window["-FILE-"].update(ctx.files[nextindex])
+            window.write_event_value('-LOADIMAGE_B-', True)
             
         if event in ["Load Image", "-LOADIMAGE_B-", "-FILE-"]:           # ---- Load Image ----------------
-            try:
-                print(event)
+            if eh_load_image(ctx, event, window, values):
+                persist = {'-NEWPREFIX-': values['-NEWPREFIX-'], '-NEWSUFFIX-': values['-NEWSUFFIX-']}
 
-                if event in ('-FILE-'):
-                    print('-FILE- event', ctx.fileselected, values['-FILE-'])
-                    if os.path.abspath(ctx.fileselected) != os.path.abspath(values['-FILE-']):
-                        print('Selected file change detected.')
-                        # Something changed, follow through
-                        foldername = values['-BROWSE-'] or '.'
-                        
-                        ctx.fileselected = os.path.abspath(values['-FILE-'])
-                        ctx.files = [os.path.abspath(x) for x in sorted(get_files_of_types(foldername))]
-                        print("different file", foldername, ctx.files, ctx.fileselected)
-                        ctx.filendx = 0
-                        try:
-                            ctx.filendx = ctx.files.index(ctx.fileselected)
-                            print("New file index", ctx.filendx)
-                        except:
-                            estr = f"Error: {traceback.format_exc()}"
-                            print(estr)
-                    else:
-                        # Already processed
-                        continue
+                window.Close()
+                window = ctx.window1
+                filename, filepath, filebase, fileleft, fileext, newbase = ctx.filevals
+                restore_from_proc(filebase, window, persist=persist)
+                window['-FILE-'].update(ctx.fields['-FILE-'])
+                filevals = eh_refresh_newname(ctx, event, window, values)
+                # window['-NEWNAME-'].update(ctx.fields['-NEWNAME-'])
+                if filevals:
+                    filename, filepath, filebase, fileleft, fileext, newbase = filevals
+                else:
+                    pass
 
-                # set_process_state(event, window, values)
-
-                filename = values["-FILE-"]
-                ctx.fields['-FILE-'] = filename
-                filepath, filebase = os.path.split(filename)
-                print("calling restore_from_proc", filebase)
-                fileleft, fileext = os.path.splitext(filebase)
-                newname = fileleft + "_ie_"
-                ctx.fields['-NEWNAME-'] = newname
-                window['-NEWNAME-'].update(newname)
-                # Use last good settings as basis, if available
-                if not ctx.lastfile in [None, '']:
-                    restore_from_proc(ctx.lastfile, window)
-                # If this file has its own settings, set those
-                restore_from_proc(filebase, window)
-
-                if os.path.exists(filename):
-                    print("resizing for image canvas, both images")
-                    imgdata, imgwidth, imgheight, origwidth, origheight = resize_image(values["-FILE-"],resize=(DISPW,DISPH))
-                    ctx.imgdata = {'data': imgdata, 'width': imgwidth, 'height': imgheight, 'origwidth': origwidth, 'origheight': origheight}
-
-                    if (1):
-                        # Need to replace the window layout, restore again
-                        layout = None
-                        newlayout = make_layout(ctx, imgwidth=imgwidth, imgheight=imgheight)
-                        #window1 = sg.Window(PROGNAME, location=location).Layout(layout)
-                        window1 = sg.Window(PROGNAME, newlayout, return_keyboard_events=True, finalize=True, location=WINDOWLOCATION)
-                        window.Close()
-                        window = window1
-                        restore_from_proc(filebase, window)
-                        window['-FILE-'].update(ctx.fields['-FILE-'])
-                        window['-NEWNAME-'].update(ctx.fields['-NEWNAME-'])
-
-                    # Back to our 
-                    # window["-IMAGE-"].update(data=imgdata)
-                    #print(help(window['-GRAPH-']))
-                    graph = window["-GRAPH-"]  # type: sg.Graph
-                    graph.draw_image(data=imgdata) # , location=(0,imgheight))
-                    #window["-GRAPH-"].update(data=imgdata, location=(0, DISPH))
-                    # graph_bottom_left=(0, 0),
-                    # graph_top_right=(800, 800),
-                    # window["-GRAPH-"].graph_top_right(imgwidth, imgheight)
-
-                    #window["-GRAPH-"].draw_image(data=imgdata, location=(0,DISPH))
-                    graph = window["-GRAPH-"]
-                    graph.draw_image(data=ctx.imgdata['data'], location=(0,ctx.imgdata['height']))
-                    window["-IMAGE2-"].update(data=imgdata)
-                    if (0):
-                        image = Image.open(values["-FILE-"])
-                        image.thumbnail((DISPW, DISPH))
-                        bio = io.BytesIO()
-                        image.save(bio, format="PNG")
-                        window["-IMAGE-"].update(data=bio.getvalue())
-                        window["-IMAGE2-"].update(data=bio.getvalue())
-                    print("image canvas loaded, both images")
-            except:
-                estr = f"Error: {traceback.format_exc()}"
-                print(estr)
+                ctx.graph.graph = window["-GRAPH-"]
+                ctx.graph.graph.draw_image(data=ctx.imgdata['data'], location=(0,ctx.imgdata['height']))
+                window["-IMAGE2-"].update(data=ctx.imgdata['data'])
+                print("image canvas loaded, both images")
+                
+            running = True
+            
         if event in ["Update Command", "-UPDATE_B-"]:
             print(event)
             set_process_state(event, window, values)
         if event in ["Process Image", "-PROCESSIMAGE_B-"]:
-            print(event)
-            # set_process_state(event, window, values)
-            srcfn = values["-FILE-"]
-            srcbase, srcext = os.path.splitext(srcfn)
-            destfn = 'tempimg' + srcext
-            if os.path.exists(srcfn):
-                # Make the cmd
-                cmd = values['-PROCESS-']
-                cmd = cmd.replace('{srcfn}', srcfn)
-                cmd = cmd.replace(values["-FILE-"], srcfn)
-                cmd = cmd.replace('{destfn}', destfn)
-                cmd = cmd.replace('tempimg.jpg', destfn)
-                print(cmd)
-                os.system(cmd)
-                if os.path.exists(destfn):
-                    imgdata, imgwidth, imgheight, origwidth, origheight = resize_image(destfn,resize=(DISPW,DISPH))
-                    ctx.imgdata2 = {'data': imgdata, 'width': imgwidth, 'height': imgheight, 'origwidth': origwidth, 'origheight': origheight}
-                    
-                    window["-IMAGE2-"].update(data=imgdata)
-                    if (0):
-                        image = Image.open(destfn)
-                        image.thumbnail((DISPW, DISPH))
-                        
-                        bio = io.BytesIO()
-                        image.save(bio, format="PNG")
-                        window["-IMAGE2-"].update(data=bio.getvalue())
+            eh_process_image(ctx, event, window, values)
+            
         if event in ["Process to File", "-PROCESS2FILE_B-"]:
             # set_process_state(event, window, values)
             print(event)
-            update_proc(values)
-            print(values)
-            srcfn = values["-FILE-"]
-            srcpath, srcfile = os.path.split(srcfn)
-            srcbase, srcext = os.path.splitext(srcfn)
-            ctx.lastfile = srcfile
-            destfn = values['-NEWNAME-'] + srcext
-            if os.path.exists(srcfn):
-                # Make the cmd
-                cmd = values['-PROCESS-']
-                cmd = cmd.replace('{srcfn}', srcfn)
-                cmd = cmd.replace(values["-FILE-"], srcfn)
-                cmd = cmd.replace('{destfn}', destfn)
-                cmd = cmd.replace('tempimg.jpg', destfn)
-                print(cmd)
-                os.system(cmd)
+            eh_process2file(ctx, event, window, values)
 
+        if event in ['-NEWPREFIX-', '-NEWSUFFIX-']:
+            eh_prefix_suffix(ctx, event, window, values)
+            
+        running = True
+            
     window.close()
 
 
