@@ -33,6 +33,20 @@ Resize upward: Probably should detect upsizing and use the process from the Imag
    - Crop always enabled
  - Added 'Previous Image' button to allow backing up.
 
+2023-01-10
+ - Found out how to add a background via ImageMagick
+   - Example: magick    /Volumes/mediaphotos/photos/photos/pixstar-frame-for-margaret/staging/1960s/2023_01_04_23_02_16.jpg -crop +667+199 -crop -620-199 +repage -channel RGB -contrast-stretch 0.02x0.02% -sigmoidal-contrast -4,40% -colorspace Gray -sharpen 0x1.6 -resize 1024x720 -repage +300+20  '(' +clone -background black -shadow 70x10+5+% ')'  '(' granite: -sigmoidal-contrast 4,99% -crop 128x96+0+0 -resize 1024x768  +repage ')'    -reverse -layers merge -colorspace Gray tempimg.jpg
+
+2023-01-12
+ - Have Background (with fixed ImageMagick 'granite' image) working
+   - Selected image is as wide or as tall as the background
+   - Background is cropped and resized to fit the full output area
+   - Selected image is overlaid on the backgorund
+   - Future
+     - Select an image to use for the background
+     - Add drop shadow to highlight the selected image
+ - Sharpen is now an option
+
 """
 
 import io
@@ -213,11 +227,15 @@ class Holder(object):
     def __init__(self):
         pass
 
-def set_process_state(event, window, values):
+def set_process_state(ctx, event, window, values):
     """
     Routine to make sense of the UI elements so far as making 
     an ImageMagick command is concerned.
+
+            ctx.imgdata = {'data': imgdata, 'width': imgwidth, 'height': imgheight, 'origwidth': origwidth, 'origheight': origheight}
+
     """
+    print("set_process_state")
     # Read the UI elements and create the cmd
     proc_fxn = "magick"
     proc_src = "{srcfn}"
@@ -245,6 +263,8 @@ def set_process_state(event, window, values):
     flip = ""
     flop = ""
     sharpen = ""
+    bgshift = ""
+    background = ""
 
     if not values["-CROP-"] in [None, '']:
         crop_part = values["-CROP-"]
@@ -304,6 +324,134 @@ def set_process_state(event, window, values):
     if 0 < len(chop_top+chop_bottom+chop_right+chop_left):
         repage = "+repage"
 
+    if values['-BACKGROUND_CB-'] in [True]:
+        # Figure out background stuff
+        """
+        Example: magick    /Volumes/mediaphotos/photos/photos/pixstar-frame-for-margaret/staging/1960s/2023_01_04_23_02_16.jpg -crop +667+199 -crop -620-199 +repage -channel RGB -contrast-stretch 0.02x0.02% -sigmoidal-contrast -4,40% -colorspace Gray -sharpen 0x1.6 -resize 1024x720 -repage +300+20  '(' +clone -background black -shadow 70x10+5+% ')'  '(' granite: -sigmoidal-contrast 4,99% -crop 128x96+0+0 -resize 1024x768  +repage ')'    -reverse -layers merge -colorspace Gray tempimg.jpg
+        """
+        print("calculations for background")
+        shadow = True
+        origwidth = ctx.imgdata['origwidth']
+        origheight = ctx.imgdata['origheight']
+
+        if values['-CROP-'] in [None, '']:
+            cdx = origwidth
+            cdy = origheight
+            print("interactive crop", ctx.crop_params)
+        else:
+            # Parse the crop string
+            print("parsing the crop")
+            print("-CROP-", values['-CROP-'])
+            cparts = [x.strip() for x in values['-CROP-'].split(" ")]
+            print("cparts", cparts)
+            
+            cparts0 = cparts[1]
+            print("cparts0", cparts0)
+            
+            cparts1 = cparts[3]
+            print("cparts1", cparts1)
+            
+            print(cparts0.split("+"))
+            t0, tl, tt = cparts0.split("+")
+            tl = int(tl)
+            tt = int(tt)
+
+            print(cparts1.split("-"))
+            b0, br, bb = cparts1.split("-")
+            br = int(br)
+            bb = int(bb)
+
+            ctx.crop_params = [tl, tt, br, bb]
+            print("parsed crop", ctx.crop_params)
+            
+            cdx = origwidth - (ctx.crop_params[0]+ctx.crop_params[2])
+            cdy = origheight - (ctx.crop_params[1]+ctx.crop_params[3])
+            
+        if 0 < len(rotate) and (values['-ROTATE-90-'] or values['-ROTATE-270-']):
+            rcdx = cdy
+            rcdy = cdx
+        else:
+            rcdx = cdx
+            rcdy = cdy
+
+        # What's our desired aspect ratio?
+        asprat = 4.0/3.0
+
+        # Based on default aspect ratio
+        if rcdy > rcdx:            
+            targetwidth = int(round(asprat * rcdy))
+            targetheight = rcdy
+            rasprat = rcdx / rcdy
+            tasprat = targetwidth / targetheight
+            print(f"default aspect ratio {'%4.2f' % asprat}, portrait case: crop-rotate aspect ratio {'%4.2f' % rasprat} {rcdx}x{rcdy}, target {'%4.2f' % tasprat} {targetwidth}x{targetheight}")
+        else:
+            rasprat = rcdx / rcdy
+            targetwidth = max(rcdx, int(round(asprat*rcdy)))
+            targetheight = int(round(targetwidth / asprat))
+            tasprat = targetwidth / targetheight
+            print(f"default aspect ratio {'%4.2f' % asprat}, landscape case: crop-rotate aspect ratio {'%4.2f' % rasprat} {rcdx}x{rcdy}, target {'%4.2f' % tasprat} {targetwidth}x{targetheight}")
+        
+        # Override if there is a resize operation
+        if values["-RESIZE_CB-"] in [True]:
+            # Interpret geo
+            rw, rh = values["-RESIZE_GEO-"].split('x')
+            asprat = float(rw) / float(rh)
+            targetwidth = float(rw)
+            targetheight = float(rh)
+            rasprat = rcdx / rcdy
+            tasprat = targetwidth / targetheight
+            print(f"resize aspect ratio {'%4.2f' % asprat}, sole case: crop-rotate aspect ratio {'%4.2f' % rasprat} {rcdx}x{rcdy}, target {'%4.2f' % tasprat} {targetwidth}x{targetheight}")
+
+        imgasprat = (rcdx +0.0) / (rcdy + 0.0)
+
+        if imgasprat == asprat:
+            background = "" # No room for background
+        elif imgasprat > asprat:
+            # Pano
+            print('Landscape background')
+            virtheight = rcdx / asprat
+            shiftt = int(round(0.5*(targetheight-linmap(rcdy, 0, virtheight, 0, targetheight))))
+            
+            bgshift = "-repage +%s+%s" % (0,shiftt)
+            dropshadow = " " # "  '(' +clone -background black -shadow 70x10+5+% ')' "
+            gy = int(round(linmap(1.0/asprat, 0, 1, 0, 128)))
+            graniteback = f" '(' granite: -sigmoidal-contrast 4,99% -crop 128x{gy}+0+0 -resize {targetwidth}x{targetheight} {grayscale} +repage ')' "
+            bgpost = "-reverse -layers merge"
+            background = " ".join([bgshift, dropshadow, graniteback, bgpost])
+            print(origwidth, origheight, rcdx, rcdy, targetwidth, targetheight, shiftt)
+            pass
+        else:
+            """
+            Problem: background is the wrong size
+            Portrait background
+2088 2093 1780 1758 1780 1335 214
+-PROCESSIMAGE_B-
+magick /Users/wesley.elsberry/personal/_projects/pixstar-baywing/staging/sort/1960--1961maybe-elsberry-square-_2022_04_18_23_16_05.jpg -crop +141+147 -crop -167-188 +repage -channel RGB -contrast-stretch 0.02x0.02% -sigmoidal-contrast +1,50% -colorspace Gray -sharpen 0x1.6 -repage +214+0    '(' granite: -sigmoidal-contrast 4,99% -crop 128x96+0+0 -resize 1780x1335 -colorspace Gray +repage ')'  -reverse -layers merge tempimg.jpg
+1994 1758 400 352
+
+default aspect ratio 1.33, landscape case: crop-rotate aspect ratio 1.00 1764x1763, target 1.33 1764x1323
+Portrait background
+2088 2093 1764 1763 1764 1323 220
+-PROCESSIMAGE_B-
+magick /Users/wesley.elsberry/personal/_projects/pixstar-baywing/staging/sort/1960--1961maybe-elsberry-square-_2022_04_18_23_16_05.jpg -crop +141+147 -crop -183-183 +repage -channel RGB -contrast-stretch 0.02x0.02% -sigmoidal-contrast +1,50% -colorspace Gray -sharpen 0x1.6 -repage +220+0    '(' granite: -sigmoidal-contrast 4,99% -crop 128x96+0+0 -resize 1764x1323 -colorspace Gray +repage ')'  -reverse -layers merge tempimg.jpg
+
+            
+            """
+            # Vertical
+            print("Portrait background")
+            virtwidth = rcdy * asprat
+            shiftr = int(round(0.5*(targetwidth-linmap(rcdx, 0, virtwidth, 0, targetwidth))))
+            
+            bgshift = "-repage +%s+%s" % (shiftr,0)
+            dropshadow = " " # "  '(' +clone -background black -shadow 70x10+5+% ')' "
+            gy = int(round(linmap(1.0/asprat, 0, 1, 0, 128)))
+            graniteback = f" '(' granite: -sigmoidal-contrast 4,99% -crop 128x{gy}+0+0 -resize {targetwidth}x{targetheight} {grayscale} +repage ')' "
+            bgpost = "-reverse -layers merge"
+            background = " ".join([bgshift, dropshadow, graniteback, bgpost])
+            print(origwidth, origheight, rcdx, rcdy, targetwidth, targetheight, shiftr)
+            pass
+            
+        
     # I want to make a command out of a bunch of things that may
     # or may not be there. So I'm creating a list of strings
     # and only passing non-zero length strings to be joined
@@ -328,6 +476,7 @@ def set_process_state(event, window, values):
                       negate,
                       resize,
                       sharpen,
+                      background,
                       destfn]
                      ]
                     if 0 < len(y) 
@@ -446,6 +595,7 @@ def make_layout(ctx, imgwidth=400, imgheight=400):
                 sg.Checkbox('Contrast Stretch', default=False, key='-CONTRASTSTRETCH_CB-'), sg.Input('0.02x0.02%', size=(16,1), key="-CONTRASTSTRETCH_GEO-"),
                 sg.Checkbox('Resize', default=False, key='-RESIZE_CB-'), sg.Input('1024x756', size=(16,1), key="-RESIZE_GEO-"),
                 sg.Checkbox('Grayscale', default=False, key='-GRAYSCALE_CB-'),
+                sg.Checkbox('Background', default=False, key='-BACKGROUND_CB-'),
             ],
             sg.Input("magick {srcfn} -gravity east -chop 0x0% +repage -channel RGB -contrast-stretch 1x1% -colorspace Gray -negate {destfn}", size=(128,1), key="-PROCESS-"),
             sg.Button("Update Command", key="-UPDATE_B-"), sg.Button("Process Image", key="-PROCESSIMAGE_B-"),
@@ -490,7 +640,7 @@ def linmap(dy, dx1, dx2, rx1, rx2):
     
     return ry
 
-def make_crop(myrect, origwidth, origheight, cropwidth, cropheight):
+def make_crop(ctx, myrect, origwidth, origheight, cropwidth, cropheight):
     """
     Cropping has an issue. I'm drawing a rectangle on an image that's
     almost certainly not the size of the source image I want to crop,
@@ -517,6 +667,8 @@ def make_crop(myrect, origwidth, origheight, cropwidth, cropheight):
         origb = int(round(linmap(tb, 0, cropheight, 0, origheight)))
         origt = int(round(linmap(tt, cropheight, 0, 0, origheight)))
 
+        ctx.crop_params = [origl, origt, origr,origb]
+        ctx.cropped_params = [cropwidth, cropheight]
         # Make the crop string
         mycrop = f"-crop +{origl}+{origt} -crop -{origr}-{origb} +repage"
     except:
@@ -654,6 +806,12 @@ def eh_process2file(ctx, event, window, values):
         else:
             pass
 
+        if srcfn == destfn:
+            estr = "Error: Source and destination filenames match! Skipping."
+            print(estr)
+            window['-INFO-'].update(estr)
+            return False
+
         if os.path.exists(srcfn):
             # Make the cmd
             cmd = values['-PROCESS-']
@@ -673,13 +831,14 @@ def eh_graph(ctx, event, window, values):
     """
     """
     try:
+        # graph = window["-GRAPH-"]
         #ctx.graph = Holder()
         
         ctx.graph.x, ctx.graph.y = values["-GRAPH-"]
         if not ctx.graph.dragging:
             ctx.graph.start_point = (ctx.graph.x, ctx.graph.y)
             ctx.graph.dragging = True
-            ctx.graph.drag_figures = graph.get_figures_at_location((ctx.graph.x,ctx.graph.y))
+            ctx.graph.drag_figures = ctx.graph.get_figures_at_location((ctx.graph.x,ctx.graph.y))
             ctx.graph.lastxy = ctx.graph.x, ctx.graph.y
         else:
             ctx.graph.end_point = (ctx.graph.x, ctx.graph.y)
@@ -741,7 +900,7 @@ def eh_load_image(ctx, event, window, values):
                 # Already processed
                 return False
 
-        # set_process_state(event, window, values)
+        # set_process_state(ctx, event, window, values)
 
         if (0):
             filename = values["-FILE-"]
@@ -788,7 +947,7 @@ def eh_process_image(ctx, event, window, values):
     """
     try:
         print(event)
-        # set_process_state(event, window, values)
+        # set_process_state(ctx, event, window, values)
         srcfn = values["-FILE-"]
         srcbase, srcext = os.path.splitext(srcfn)
         destfn = 'tempimg' + srcext
@@ -913,6 +1072,9 @@ def sg_event_loop_window_1():
     ctx.graph.start_point = ctx.graph.end_point = ctx.graph.prior_rect = None
     # graph.bind('<Button-3>', '+RIGHT+')
 
+    ctx.crop_params = [0,0,0,0]
+    ctx.cropped_params = [0,0]
+    
     print("entering event loop")
     running = True
     while running:
@@ -937,7 +1099,7 @@ def sg_event_loop_window_1():
             ctx.rect = (ctx.graph.start_point, ctx.graph.end_point)
             ctx.graph.rect = (ctx.graph.start_point, ctx.graph.end_point)
             # Set chop points
-            mycrop = make_crop(ctx.rect,
+            mycrop = make_crop(ctx, ctx.rect,
                                ctx.imgdata['origwidth'],
                                ctx.imgdata['origheight'],
                                ctx.imgdata['width'],
@@ -1012,12 +1174,12 @@ def sg_event_loop_window_1():
             
         if event in ["Update Command", "-UPDATE_B-"]:
             print(event)
-            set_process_state(event, window, values)
+            set_process_state(ctx, event, window, values)
         if event in ["Process Image", "-PROCESSIMAGE_B-"]:
             eh_process_image(ctx, event, window, values)
             
         if event in ["Process to File", "-PROCESS2FILE_B-"]:
-            # set_process_state(event, window, values)
+            # set_process_state(ctx, event, window, values)
             print(event)
             eh_process2file(ctx, event, window, values)
 
