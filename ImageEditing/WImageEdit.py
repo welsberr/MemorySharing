@@ -47,6 +47,10 @@ Resize upward: Probably should detect upsizing and use the process from the Imag
      - Add drop shadow to highlight the selected image
  - Sharpen is now an option
 
+2023-01-28
+ - Need to add Sharpen and Background to actions
+
+
 """
 
 import io
@@ -587,7 +591,7 @@ def make_layout(ctx, imgwidth=400, imgheight=400):
                 sg.Input("1,50%", size=(16,1), key='-SIGMOIDAL-CONTRAST_GEO-'),
                 sg.T("    "),
                 sg.Checkbox('Sharpen', default=False, key='-SHARPEN-'),
-                sg.Input("0x1.0", size=(12,1), key='-SHARPEN_GEO-'),                
+                sg.Input("0x2.0", size=(12,1), key='-SHARPEN_GEO-'),                
             ],
             [
                 sg.Checkbox('Invert', default=False, key='-INVERT_CB-'),
@@ -717,6 +721,8 @@ def eh_action_colorpos(ctx, event, window, values, params=
                            '-CONTRASTSTRETCH_CB-': True,
                            '-SIGMOIDAL-CONTRAST-': True,
                            '-GRAYSCALE_CB-': False,
+                           '-SHARPEN-': True,
+                           '-BACKGROUND_CB-': True,
                        }
                        ):
     """
@@ -734,10 +740,12 @@ def eh_action_colorneg(ctx, event, window, values, params=
                            '-CONTRASTSTRETCH_CB-': True,
                            '-SIGMOIDAL-CONTRAST-': True,
                            '-GRAYSCALE_CB-': False,
+                           '-SHARPEN-': True,
+                           '-BACKGROUND_CB-': True,
                        }
                        ):
     """
-    Set values for processing a color positive
+    Set values for processing a color negative
     """
     eh_action_set(window, params)
 
@@ -751,10 +759,12 @@ def eh_action_bwpos(ctx, event, window, values, params=
                            '-CONTRASTSTRETCH_CB-': True,
                            '-SIGMOIDAL-CONTRAST-': True,
                            '-GRAYSCALE_CB-': True,
+                           '-SHARPEN-': True,
+                           '-BACKGROUND_CB-': True,
                        }
                        ):
     """
-    Set values for processing a color positive
+    Set values for processing a black-and-white positive
     """
     eh_action_set(window, params)
 
@@ -767,10 +777,12 @@ def eh_action_bwneg(ctx, event, window, values, params=
                            '-CONTRASTSTRETCH_CB-': True,
                            '-SIGMOIDAL-CONTRAST-': True,
                            '-GRAYSCALE_CB-': True,
+                           '-SHARPEN-': True,
+                           '-BACKGROUND_CB-': True,
                        }
                        ):
     """
-    Set values for processing a color positive
+    Set values for processing a black-and-white negative
     """
     eh_action_set(window, params)
 
@@ -830,11 +842,20 @@ def eh_process2file(ctx, event, window, values):
 def eh_graph(ctx, event, window, values):
     """
     """
+    def bounded(gwidth, gheight, x, y):
+        x = min(gwidth,max(0,x))
+        y = min(gheight, max(0,y))
+        return x, y
+    
     try:
         # graph = window["-GRAPH-"]
         #ctx.graph = Holder()
+        gwidth = ctx.imgdata['width']
+        gheight = ctx.imgdata['height']
         
         ctx.graph.x, ctx.graph.y = values["-GRAPH-"]
+        ctx.graph.x, ctx.graph.y = bounded(gwidth, gheight, ctx.graph.x, ctx.graph.y)
+        
         if not ctx.graph.dragging:
             ctx.graph.start_point = (ctx.graph.x, ctx.graph.y)
             ctx.graph.dragging = True
