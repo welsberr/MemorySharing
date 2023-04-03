@@ -51,12 +51,207 @@ Resize upward: Probably should detect upsizing and use the process from the Imag
  - Need to add Sharpen and Background to actions
 
 
+
+"""
+
+CHATGPT = """
+
+Write a Python function that detects the screen size for use at initialization of a PySimpleGui program
+
+Here's a Python function that detects the screen size using the tkinter library, which can be used to initialize a PySimpleGUI program:
+
+python
+
+import tkinter as tk
+
+def detect_screen_size():
+    root = tk.Tk()
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    root.destroy()
+    return screen_width, screen_height
+
+This function creates a temporary Tk object from the tkinter library, which provides access to the screen size using the winfo_screenwidth and winfo_screenheight methods. These methods return the width and height of the screen in pixels, respectively.
+
+After obtaining the screen size, the function destroys the temporary Tk object to avoid any unwanted windows from appearing.
+
+To use this function in a PySimpleGUI program, simply call it at the beginning of your script and pass the returned values to the set_global_icon() method (if you're using an icon), or use them to set the size parameter in the Window() constructor:
+
+python
+
+import PySimpleGUI as sg
+
+# Detect screen size
+screen_width, screen_height = detect_screen_size()
+
+# Initialize PySimpleGUI window
+sg.Window("My Window", size=(screen_width, screen_height)).read()
+
+
+
+Model: GPT-4
+
+Wesley Elsberry
+Write a pair of functions in Python to extract EXIF information from a given JPEG filename, and write common modified EXIF fields (comment, copywrite, etc.) to a given JPEG filename.
+To extract and modify EXIF information from a JPEG file, you can use the Pillow library (a fork of the Python Imaging Library - PIL). First, you need to install the library if you haven't already:
+
+Copy code
+pip install Pillow
+
+
+from PIL import Image
+from PIL.ExifTags import TAGS
+from typing import Dict
+
+
+def extract_exif(jpeg_filename: str) -> Dict[str, str]:
+    exif_data = {}
+    image = Image.open(jpeg_filename)
+    info = image._getexif()
+
+
+    if info:
+        for tag, value in info.items():
+            decoded = TAGS.get(tag, tag)
+            exif_data[decoded] = value
+
+    return exif_data
+
+
+def modify_exif(jpeg_filename: str, updated_exif: Dict[str, str]):
+    image = Image.open(jpeg_filename)
+    info = image._getexif()
+    exif = {TAGS[key]: value for key, value in info.items() if key in TAGS}
+
+    for key, value in updated_exif.items():
+        if key in exif:
+            exif[key] = value
+
+    exif_bytes = image.info['exif']
+    # Convert the updated exif dict back to bytes
+    from PIL.ExifTags import GPSTAGS
+    from io import BytesIO
+    new_exif_bytes = BytesIO()
+    new_exif = Image.Exif()
+    for key, value in exif.items():
+        new_exif[key] = value
+    new_exif_bytes = new_exif.tobytes()
+
+    # Save the image with the updated EXIF data
+    output_filename = 'modified_' + jpeg_filename
+    image.save(output_filename, 'jpeg', exif
+
+
+Write a Python PySimpleGUI program that displays thumbnails of JPEG files in a selected directory, retrieves and displays EXIF data from a selected thumbnail, permits editing of EXIF information, and will write back the edited EXIF information to the selected thumbnail's JPEG file.
+!
+First, you need to install the PySimpleGUI and Pillow libraries if you haven't already:
+
+bash
+Copy code
+pip install PySimpleGUI Pillow
+Here's a simple PySimpleGUI program that meets your requirements:
+
+python
+Copy code
+import os
+import glob
+import PySimpleGUI as sg
+from PIL import Image, ImageTk
+from typing import Dict
+
+# Import the previously defined functions
+from exif_utils import extract_exif, modify_exif
+
+
+def create_thumbnail(image_path: str, thumbnail_size=(100, 100)) -> ImageTk.PhotoImage:
+    image = Image.open(image_path)
+    image.thumbnail(thumbnail_size)
+    return ImageTk.PhotoImage(image)
+
+
+def display_thumbnails(folder: str) -> Dict[str, str]:
+    file_types = ('*.jpg', '*.jpeg')
+    files = []
+    for file_type in file_types:
+        files.extend(glob.glob(os.path.join(folder, file_type)))
+
+    thumbnails = {}
+    for file in files:
+        try:
+            thumbnail = create_thumbnail(file)
+            thumbnails[file] = thumbnail
+        except OSError:
+            pass
+
+    return thumbnails
+
+
+# Main program
+sg.theme('DarkBlue')
+
+layout = [
+    [sg.Text('Select a directory:'), sg.Input(), sg.FolderBrowse()],
+    [sg.Text('Click on a thumbnail to view and edit EXIF data')],
+    [sg.Image(key='selected_image'), sg.Multiline(key='exif_data', size=(40, 20), disabled=True)],
+    [sg.Button('Edit EXIF'), sg.Button('Save EXIF'), sg.Button('Exit')]
+]
+
+window = sg.Window('Image EXIF Viewer', layout)
+selected_image_path = None
+thumbnails = {}
+
+while True:
+    event, values = window.read()
+
+    if event == sg.WIN_CLOSED or event == 'Exit':
+        break
+    elif event == 'Browse':
+        folder = values[0]
+        if folder:
+            thumbnails = display_thumbnails(folder)
+            if thumbnails:
+                for file, thumbnail in thumbnails.items():
+                    layout.append([sg.Button('', image_data=thumbnail, key=file, border_width=0)])
+                window.layout(layout)
+            else:
+                sg.popup('No JPEG files found in the selected folder.')
+    elif event in thumbnails:
+        selected_image_path = event
+        window['selected_image'].update(data=thumbnails[selected_image_path])
+        exif_data = extract_exif(selected_image_path)
+        window['exif_data'].update('\n'.join(f'{key}: {value}' for key, value in exif_data.items()))
+    elif event == 'Edit EXIF' and selected_image_path:
+        exif_data = extract_exif(selected_image_path)
+        edit_exif_layout = [[sg.Text(f'{key}:'), sg.Input(value, key=key)] for key, value in exif_data.items()]
+        edit_exif_layout.append([sg.Button('Update'), sg.Button('Cancel')])
+        edit_exif_window = sg.Window('Edit EXIF Data', edit_exif_layout)
+
+        while True:
+            edit_event, edit_values = edit_exif_window.read()
+            if edit_event == 'Update':
+                updated_exif = {key: value for key, value in edit_values.items()}
+                modify_exif(selected_image_path, updated_exif)
+                exif_data = extract_exif(selected_image_path)
+                window['exif_data'].update('\n'.join(f'{key}: {value}' for key, value in exif_data.items()))
+                edit_exif_window.close()
+                break
+            elif edit_event == sg.WIN_CLOSED or edit_event == 'Cancel':
+                edit_exif_window
+network error
+
+
+
+
+
+
+
 """
 
 import io
 import os
 import glob
 from pathlib import Path
+import tkinter as tk
 import PySimpleGUI as sg
 from PIL import Image
 import PIL
@@ -77,6 +272,13 @@ PROGNAME = 'WImageEdit'
 WINDOWLOCATION = (0, 20)
 DISPW = 400
 DISPH = 400
+
+def detect_screen_size():
+    root = tk.Tk()
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    root.destroy()
+    return screen_width, screen_height
 
 def get_files_of_types_path(mypath, myfiletypes={".jpg", ".JPG", ".png", ".PNG", ".gif", ".GIF", ".jpeg", ".JPEG", ".jfif", ".JFIF"}):
     """
@@ -509,7 +711,7 @@ def new_graph(imgwidth, imgheight, key='-GRAPH-'):
                 )
     return mygraph
 
-def make_layout(ctx, imgwidth=400, imgheight=400):
+def make_layout(ctx, imgwidth=None, imgheight=None, reservew=0.3, reserveh=0.66667):
     """
     Changing some of the UI elements at runtime was going to be
     hard. The advice from the PSG author? Replace the whole layout.
@@ -518,7 +720,38 @@ def make_layout(ctx, imgwidth=400, imgheight=400):
 
     The tricky part with this is that PSG does not allow a new layout
     item with an existing key to be created. 
+
+    2023-03-11: Notion: Graph sizes could be larger on larger screens.
+    Need screen size to inform the layout.
     """
+    global DISPW, DISPH
+
+    if not 'screeninfo' in dir(ctx):
+        # Call for screen size
+        ctx.screeninfo = detect_screen_size()
+        ctx.screen_width = ctx.screeninfo[0] 
+        ctx.screen_height = ctx.screeninfo[1]
+        
+    if imgwidth in [None]:
+        # Adjust imgwidth
+        # Reserve 9% of screen width, and there's two of them
+        imgwidth = int(ctx.screen_width * (1.0 - reservew) * 0.5)
+        ctx.imgdata['width'] = imgwidth
+        DISPW = imgwidth
+    else:
+        print("imgwidth as passed:", imgwidth)
+        
+    if  imgheight in [None]:
+        # Adjust imgheight
+        # Reserve 1/3rd sh
+        imgheight = int(ctx.screen_height * reserveh)
+        ctx.imgdata['height'] = imgheight
+        DISPH = imgheight
+    else:
+        print("imgheight as passsd:", imgheight)
+
+    print(f"Screen {ctx.screen_width} x {ctx.screen_height}, Image {ctx.imgdata['width']} x {ctx.imgdata['height']} ")
+        
     # T : Text, R : RadioButton
     # I grabbed part of my layout from a demo of graphing over an image.
     # Most of those functions I didn't need.
@@ -534,6 +767,21 @@ def make_layout(ctx, imgwidth=400, imgheight=400):
            #[sg.R('Move Everything', 1, key='-MOVEALL-', enable_events=True)],
            #[sg.R('Move Stuff', 1, key='-MOVE-', enable_events=True)],
            #[sg.B('Save Image', key='-SAVE-')],
+                [sg.T('Crop Nudge (pixels):'),
+                 sg.Input('10', size=(7,1), key="-CROP_NUDGE-", enable_events=True)],
+                [sg.T('  '),sg.T('  '),sg.T('  '),sg.Button('T^', key="-CROP_NUDGE_RAISE_TOP-", enable_events=True)],
+                [sg.T('  '),sg.T('  '),sg.T('  '),sg.Button('T-', key="-CROP_NUDGE_LOWER_TOP-", enable_events=True)],
+
+                [sg.Button('<-L', key="-CROP_NUDGE_REDUCE_LEFT-", enable_events=True),
+                 sg.Button('L->', key="-CROP_NUDGE_INCREASE_LEFT-", enable_events=True),
+                 sg.T('  '),
+                 sg.Button('<-R', key="-CROP_NUDGE_REDUCE_RIGHT-", enable_events=True),
+                 sg.Button('R->', key="-CROP_NUDGE_INCREASE_RIGHT-", enable_events=True),
+                 ],
+
+                [sg.T('  '),sg.T('  '),sg.T('  '), sg.Button('B^', key="-CROP_NUDGE_RAISE_BOTTOM-", enable_events=True)],
+                [sg.T('  '),sg.T('  '),sg.T('  '), sg.Button('B-', key="-CROP_NUDGE_LOWER_BOTTOM-", enable_events=True),
+                 ],
            ]
 
     graphlayout = [[new_graph(imgwidth,imgheight), sg.Col(graphcol, key='-COL-') ],
@@ -947,7 +1195,7 @@ def eh_load_image(ctx, event, window, values):
         restore_from_proc(filebase, window, persist=persist)
 
         if os.path.exists(filename):
-            print("resizing for image canvas, both images")
+            print("resizing for image canvas, both images", DISPW, DISPH)
             imgdata, imgwidth, imgheight, origwidth, origheight = resize_image(values["-FILE-"],resize=(DISPW,DISPH))
             ctx.imgdata = {'data': imgdata, 'width': imgwidth, 'height': imgheight, 'origwidth': origwidth, 'origheight': origheight}
 
@@ -1013,6 +1261,50 @@ def eh_prefix_suffix(ctx, event, window, values):
         return False
     
 
+#    ==== Template ---------------------------------------------
+def eh_process_crop_nudge(ctx, event, window, values):
+    """
+    """
+    def update_crop_text(ctx, window, nl=0, nt=0, nr=0, nb=0):
+        origl, origt, origr,origb  =      ctx.crop_params
+        origl += nl
+        origt += nt
+        origr += nr
+        origb += nb
+        ctx.crop_params = [origl, origt, origr,origb]
+        # Make the crop string
+        mycrop = f"-crop +{origl}+{origt} -crop -{origr}-{origb} +repage"
+        print("New crop:", mycrop)
+        window['-CROP-'].update(mycrop)
+        
+    try:
+        np = int(values['-CROP_NUDGE-'])
+        nl = 0
+        nt = 0
+        nr = 0
+        nb = 0
+        if event in ['-CROP_NUDGE_RAISE_TOP-']:
+            nt = -np
+        elif event in ['-CROP_NUDGE_LOWER_TOP-']:
+            nt = np
+        elif event in ['-CROP_NUDGE_RAISE_BOTTOM-']:
+            nb = np
+        elif event in ['-CROP_NUDGE_LOWER_BOTTOM-']:
+            nb = -np
+        elif event in ['-CROP_NUDGE_REDUCE_LEFT-']:
+            nl = -np
+        elif event in ['-CROP_NUDGE_INCREASE_LEFT-']:
+            nl = np
+        elif event in ['-CROP_NUDGE_REDUCE_RIGHT-']:
+            nr = np
+        elif event in ['-CROP_NUDGE_INCREASE_RIGHT-']:
+            nr = -np
+        update_crop_text(ctx, window, nl, nt, nr, nb)
+    except:
+        estr = f"Error: {traceback.format_exc()}"
+        print(estr)
+        return False
+    
 #    ==== Template ---------------------------------------------
 def eh_template(ctx, event, window, values):
     """
@@ -1206,6 +1498,11 @@ def sg_event_loop_window_1():
 
         if event in ['-NEWPREFIX-', '-NEWSUFFIX-']:
             eh_prefix_suffix(ctx, event, window, values)
+
+        # Crop Nudge handling
+        if event in [ '-CROP_NUDGE_RAISE_TOP-','-CROP_NUDGE_LOWER_TOP-','-CROP_NUDGE_RAISE_BOTTOM-','-CROP_NUDGE_LOWER_BOTTOM-',
+                     '-CROP_NUDGE_REDUCE_LEFT-','-CROP_NUDGE_INCREASE_LEFT-','-CROP_NUDGE_REDUCE_RIGHT-','-CROP_NUDGE_INCREASE_RIGHT-']:
+            eh_process_crop_nudge(ctx, event, window, values)
             
         running = True
             
