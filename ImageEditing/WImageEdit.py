@@ -295,6 +295,11 @@ def get_files_of_types(mypath, patterns=["*.jpg", "*.JPG", "*.png", "*.PNG", "*.
 
     This runs glob as many times as there are patterns. FML
     """
+    try:
+        os.chdir(mypath)
+    except:
+        estr = f"Error: {traceback.format_exc()}"
+        print(estr)
     files1 = [os.path.abspath(x).replace(r"\\", r'/') for x in sorted(it.chain.from_iterable(glob.iglob(pattern) for pattern in patterns))]
     return files1
               
@@ -1153,10 +1158,13 @@ def eh_load_image(ctx, event, window, values):
             if os.path.abspath(ctx.fileselected) != os.path.abspath(values['-FILE-']):
                 print('Selected file change detected.')
                 # Something changed, follow through
-                foldername = values['-BROWSE-'] or '.'
-
+                
+                foldername = os.path.split(os.path.abspath(values['-FILE-']))[0] or values['-BROWSE-'] or '.'
+                print(f"new {foldername=}")
                 ctx.fileselected = os.path.abspath(values['-FILE-'])
+                print(f"get_files_of_types(foldername) {get_files_of_types(foldername)}")
                 ctx.files = [os.path.abspath(x) for x in sorted(get_files_of_types(foldername))]
+                print(f"ctx.files of {foldername=} {ctx.files}")
                 print("different file", foldername, ctx.files, ctx.fileselected)
                 ctx.filendx = 0
                 try:
@@ -1442,25 +1450,35 @@ def sg_event_loop_window_1():
             print('IMAGE mouse event ', event, values)
         if event in ["-PREVIOUSIMAGE-"]:
             print('-PREVIOUSIMAGE- event')
-            nextindex = (ctx.filendx - 1) % len(ctx.files) # Wrap via modulo
-            nextfile = ctx.files[nextindex]
-            if nextfile == values['-FILE-']:
-                nextindex = (ctx.filendx + 1) % len(ctx.files) # Wrap via modulo
-            print(f"Current index {ctx.filendx}, next index {nextindex}")
-            ctx.filendx = nextindex
-            window["-FILE-"].update(ctx.files[nextindex])
-            window.write_event_value('-LOADIMAGE_B-', True)
+            try:
+                nextindex = (ctx.filendx - 1) % len(ctx.files) # Wrap via modulo
+                nextfile = ctx.files[nextindex]
+                if nextfile == values['-FILE-']:
+                    nextindex = (ctx.filendx + 1) % len(ctx.files) # Wrap via modulo
+                print(f"Current index {ctx.filendx}, next index {nextindex}")
+                ctx.filendx = nextindex
+                window["-FILE-"].update(ctx.files[nextindex])
+                window.write_event_value('-LOADIMAGE_B-', True)
+            except:
+                estr = f"Error: {traceback.format_exc()}"
+                print(estr)
+                print(f"ctx.filendx={ctx.filendx}, len(ctx.files)={len(ctx.files)} {ctx.files}")
             
         if event in ["-NEXTIMAGE-"]:
             print('-NEXTIMAGE- event')
-            nextindex = (ctx.filendx + 1) % len(ctx.files) # Wrap via modulo
-            nextfile = ctx.files[nextindex]
-            if nextfile == values['-FILE-']:
+            try:
                 nextindex = (ctx.filendx + 1) % len(ctx.files) # Wrap via modulo
-            print(f"Current index {ctx.filendx}, next index {nextindex}")
-            ctx.filendx = nextindex
-            window["-FILE-"].update(ctx.files[nextindex])
-            window.write_event_value('-LOADIMAGE_B-', True)
+                nextfile = ctx.files[nextindex]
+                if nextfile == values['-FILE-']:
+                    nextindex = (ctx.filendx + 1) % len(ctx.files) # Wrap via modulo
+                print(f"Current index {ctx.filendx}, next index {nextindex}")
+                ctx.filendx = nextindex
+                window["-FILE-"].update(ctx.files[nextindex])
+                window.write_event_value('-LOADIMAGE_B-', True)
+            except:
+                estr = f"Error: {traceback.format_exc()}"
+                print(estr)
+                print(f"ctx.filendx={ctx.filendx}, len(ctx.files)={len(ctx.files)} {ctx.files}")
             
         if event in ["Load Image", "-LOADIMAGE_B-", "-FILE-"]:           # ---- Load Image ----------------
             if eh_load_image(ctx, event, window, values):
@@ -1469,6 +1487,7 @@ def sg_event_loop_window_1():
                 window.Close()
                 window = ctx.window1
                 filename, filepath, filebase, fileleft, fileext, newbase = ctx.filevals
+                ctx.files = sorted(get_files_of_types(filepath))
                 restore_from_proc(filebase, window, persist=persist)
                 window['-FILE-'].update(ctx.fields['-FILE-'])
                 filevals = eh_refresh_newname(ctx, event, window, values)
